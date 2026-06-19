@@ -335,7 +335,11 @@ async function reconcileManche1() {
       for (const g of remaining) {
         await updateDoc(doc(db, "groups", g.id), { status: STATUS.OUT, eliminatedAt: serverTimestamp() });
       }
-      if (remaining.length) toast(`${cut} groupes completes. Les autres passent OUT.`, "success");
+      // Arret automatique du chrono: la Manche 1 est jouee.
+      if (eventCfg.status !== EVENT_STATUS.FINISHED) {
+        await updateDoc(doc(db, "config", "event"), { status: EVENT_STATUS.FINISHED });
+      }
+      toast(`${cut} groupes completes. Chrono arrete, les autres passent OUT.`, "success");
     }
   } finally {
     reconciling = false;
@@ -502,6 +506,8 @@ function updateGroupMeta(gid) {
 function updateGroupQty(gid) {
   const g = groupsMap[gid]; if (!g) return;
   const qty = document.getElementById("gp-qty"); if (!qty) return;
+  // Ne pas re-render pendant que le GM tape une quantite (sinon le champ se vide)
+  if (qty.contains(document.activeElement) && document.activeElement.classList.contains("qty-edit")) return;
   const m = eventCfg ? eventCfg.currentManche : 1;
   const countObjs = allObjectives.filter((o) => o.manche === m && o.type === OBJ_TYPE.COUNT);
 
@@ -524,7 +530,8 @@ function updateGroupQty(gid) {
         </div>
         <div class="obj-controls">
           <button class="btn icon" data-action="qty-dec" data-gid="${gid}" data-obj="${o.id}">-</button>
-          <span class="qty">${d}/${o.targetQty}</span>
+          <input type="number" class="qty-edit" data-action="qty-set" data-gid="${gid}" data-obj="${o.id}" value="${d}" min="0" />
+          <span class="qty-target">/ ${o.targetQty}</span>
           <button class="btn icon" data-action="qty-inc" data-gid="${gid}" data-obj="${o.id}">+</button>
         </div>
       </div>`;
@@ -589,6 +596,12 @@ async function adjustQty(gid, objId, delta) {
   const next = Math.max(0, cur + delta);
   await updateDoc(doc(db, "groups", gid), { [`manche1Progress.${objId}`]: next });
   // reconcileManche1 sera declenche par le snapshot groups
+}
+
+// Saisie libre d'une quantite (champ texte)
+async function setQty(gid, objId, val) {
+  const n = Math.max(0, isNaN(val) ? 0 : val);
+  await updateDoc(doc(db, "groups", gid), { [`manche1Progress.${objId}`]: n });
 }
 
 async function markComplete(gid) {
@@ -1081,6 +1094,14 @@ function wireGlobalHandlers() {
   // Soumissions de formulaires gerees par delegation
   document.addEventListener("submit", (e) => {
     if (e.target.id === "obj-create-form") { e.preventDefault(); createObjective(); }
+  });
+  // Saisie libre des quantites Manche 1 (commit sur change / Entree)
+  document.addEventListener("change", (e) => {
+    const el = e.target.closest("[data-action='qty-set']");
+    if (el) setQty(el.dataset.gid, el.dataset.obj, parseInt(el.value, 10));
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.classList && e.target.classList.contains("qty-edit")) e.target.blur();
   });
 }
 

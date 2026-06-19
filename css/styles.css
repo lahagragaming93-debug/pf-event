@@ -330,6 +330,13 @@ textarea { resize: vertical; min-height: 70px; }
 .obj.done .progress > i { background: linear-gradient(90deg, var(--term), #9dff7a); }
 
 .obj-controls { display: flex; align-items: center; gap: 0.35rem; }
+.qty-edit {
+  width: 68px; text-align: center; font-family: var(--display); color: var(--neon);
+  background: #060a0f; border: 1px solid var(--line-2); border-radius: var(--radius);
+  padding: 0.3rem 0.2rem; font-size: 0.95rem;
+}
+.qty-edit:focus { border-color: var(--neon); box-shadow: var(--glow); outline: none; }
+.qty-target { font-family: var(--display); color: var(--txt-dim); font-size: 0.9rem; white-space: nowrap; }
 
 /* Progression globale manche 1 */
 .global-progress {
