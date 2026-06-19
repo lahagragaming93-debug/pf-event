@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#04060a" />
+  <title>PROTOCOLE OMERTA // Cockpit GM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- =================== LOGIN GM =================== -->
+  <div id="admin-login" class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo">COCKPIT GM</div>
+      <div class="auth-sub">Protocole Omerta</div>
+
+      <div id="admin-login-body">
+        <div class="dim tiny" style="text-align:center;margin-bottom:1rem">Verification de l'habilitation...</div>
+      </div>
+      <div class="auth-foot dim tiny"><a href="index.html">// Retour espace groupe</a></div>
+    </div>
+  </div>
+
+  <!-- =================== COCKPIT =================== -->
+  <div id="cockpit" class="app" style="display:none">
+
+    <header class="topbar">
+      <div class="brand">
+        <div>
+          <div class="mark">PROTOCOLE OMERTA</div>
+          <div class="codename">// COCKPIT GAME MASTER</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="mini-chrono" id="gm-chrono">--:--:--</div>
+        <button class="btn ghost sm" id="gm-logout">Quitter</button>
+      </div>
+    </header>
+
+    <!-- Barre de controle de l'event -->
+    <div class="event-bar">
+      <div class="seg">
+        <span class="dim tiny up">Manche</span>
+        <div class="manche-pick" id="manche-pick">
+          <button data-m="1">1</button>
+          <button data-m="2">2</button>
+          <button data-m="3">3</button>
+        </div>
+      </div>
+      <div class="seg">
+        <span class="dim tiny up">Duree (h)</span>
+        <input type="number" id="duration-input" min="1" step="1" style="width:80px" />
+      </div>
+      <div class="seg">
+        <button class="btn primary sm" id="btn-start">Demarrer</button>
+        <button class="btn sm" id="btn-pause">Pause</button>
+        <button class="btn danger sm" id="btn-end">Terminer</button>
+        <button class="btn term sm" id="btn-close">Cloturer la manche</button>
+      </div>
+      <div class="seg" style="margin-left:auto">
+        <span class="badge" id="event-state-badge">-</span>
+      </div>
+    </div>
+
+    <!-- Navigation des modes -->
+    <nav class="tabs" id="gm-modes">
+      <button class="tab active" data-mode="group">Groupe</button>
+      <button class="tab" data-mode="objectives">Objectifs</button>
+      <button class="tab" data-mode="chasses">Chasses</button>
+      <button class="tab" data-mode="classement">Classement</button>
+      <button class="tab" data-mode="out">Section OUT</button>
+      <button class="tab" data-mode="create">Creer un groupe</button>
+    </nav>
+
+    <div class="gm-layout">
+      <!-- Sidebar groupes -->
+      <aside class="gm-sidebar">
+        <div class="side-head">
+          <span class="dim tiny up">Cellules</span>
+          <span class="badge" id="groups-count">0</span>
+        </div>
+        <div class="group-list" id="group-list"></div>
+      </aside>
+
+      <!-- Zone principale -->
+      <main class="gm-main" id="gm-main">
+        <div id="mode-group"></div>
+        <div id="mode-objectives" style="display:none"></div>
+        <div id="mode-chasses" style="display:none"></div>
+        <div id="mode-classement" style="display:none"></div>
+        <div id="mode-out" style="display:none"></div>
+        <div id="mode-create" style="display:none"></div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="js/admin-app.js"></script>
+</body>
+</html>

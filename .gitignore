@@ -1,0 +1,15 @@
+# Dependances / outils
+node_modules/
+.firebase/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editeurs
+.vscode/
+.idea/
+
+# NE PAS ignorer firebase-config.js :
+# les cles Web Firebase sont publiques par nature, la securite vient des regles.

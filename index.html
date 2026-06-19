@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#04060a" />
+  <title>PROTOCOLE OMERTA // Espace Groupe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- =================== LOGIN =================== -->
+  <div id="login-screen" class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-logo blink">PROTOCOLE<br>OMERTA</div>
+      <div class="auth-sub">Acces cellule</div>
+
+      <form id="group-login-form" autocomplete="off">
+        <label class="field">
+          <span>Nom de groupe</span>
+          <input type="text" id="group-name" placeholder="ex: Les Corbeaux" autocomplete="off" required />
+        </label>
+        <label class="field">
+          <span>Code d'acces</span>
+          <input type="password" id="group-pass" placeholder="********" autocomplete="off" required />
+        </label>
+        <button type="submit" class="btn primary block" id="group-login-btn">S'infiltrer</button>
+        <div class="auth-error" id="group-login-error"></div>
+      </form>
+
+      <div class="auth-foot dim tiny">
+        Acces reserve aux cellules enregistrees par le Game Master.<br>
+        <a href="admin.html">// Acces Game Master</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== APP =================== -->
+  <div id="app" class="app" style="display:none">
+
+    <header class="topbar">
+      <div class="brand">
+        <div>
+          <div class="mark">PROTOCOLE OMERTA</div>
+          <div class="codename">// CELLULE <span id="top-group-name" class="neon"></span></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="who">Manche <b id="top-manche">-</b> <span id="top-event-state" class="badge"></span></div>
+        <div class="mini-chrono" id="mini-chrono">--:--:--</div>
+        <button class="btn ghost sm" id="logout-btn">Deconnexion</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="objectifs">Objectifs</button>
+      <button class="tab" data-view="chrono">Chrono</button>
+      <button class="tab" data-view="preuve" id="tab-preuve">Soumettre</button>
+      <button class="tab" data-view="chasses" id="tab-chasses">Chasses<span class="tab-badge" id="badge-chasse" style="display:none"></span></button>
+      <button class="tab" data-view="chat" id="tab-chat">Chat GM<span class="tab-badge" id="badge-chat" style="display:none"></span></button>
+      <button class="tab" data-view="classement">Classement</button>
+    </nav>
+
+    <main class="content">
+
+      <!-- OBJECTIFS -->
+      <section class="view active" id="view-objectifs">
+        <div class="section-title">Objectifs <span class="dim" id="obj-manche-label"></span></div>
+        <div class="section-sub" id="obj-sub">Liste des objectifs de la manche en cours.</div>
+        <div id="global-progress-wrap"></div>
+        <div class="obj-list" id="obj-list"></div>
+      </section>
+
+      <!-- CHRONO -->
+      <section class="view" id="view-chrono">
+        <div class="section-title">Compte a rebours</div>
+        <div class="section-sub">Temps restant sur la manche en cours.</div>
+        <div class="hud" id="big-hud">
+          <span class="state-pill badge" id="hud-state"></span>
+          <div class="scan-line"></div>
+          <div class="label" id="hud-label">Manche --</div>
+          <div class="time" id="hud-time">--:--:--</div>
+          <div class="units"><span>JOURS / HEURES</span><span>MINUTES</span><span>SECONDES</span></div>
+        </div>
+      </section>
+
+      <!-- SOUMETTRE PREUVE -->
+      <section class="view" id="view-preuve">
+        <div class="section-title">Soumettre une preuve</div>
+        <div class="section-sub">Colle une capture d'ecran (Ctrl+V) dans la zone, ou choisis un fichier. Selectionne l'objectif lie.</div>
+
+        <div class="card" style="margin-bottom:1.2rem">
+          <label class="field">
+            <span>Objectif</span>
+            <select id="proof-objective"></select>
+          </label>
+
+          <div class="paste-zone" id="paste-zone" tabindex="0">
+            <div class="pz-icon">[ + ]</div>
+            <div class="pz-hint">Clique ici puis <span class="pz-kbd">Ctrl+V</span> pour coller ta capture<br>ou glisse une image / choisis un fichier</div>
+            <input type="file" id="proof-file" accept="image/*" style="display:none" />
+            <button type="button" class="btn ghost sm" id="proof-file-btn" style="margin-top:0.7rem">Choisir un fichier</button>
+          </div>
+          <img id="proof-preview" class="preview-img" style="display:none" alt="apercu" />
+          <div class="row" style="margin-top:0.9rem">
+            <button class="btn primary" id="proof-submit" disabled>Transmettre la preuve</button>
+            <button class="btn ghost" id="proof-clear" style="flex:0 0 auto">Effacer</button>
+          </div>
+        </div>
+
+        <div class="section-title" style="font-size:0.95rem">Vos preuves transmises</div>
+        <div class="section-sub">Archive de vos soumissions et leur statut.</div>
+        <div class="grid-cards" id="proof-gallery"></div>
+      </section>
+
+      <!-- CHASSES -->
+      <section class="view" id="view-chasses">
+        <div class="section-title">Chasses actives</div>
+        <div class="section-sub">Quand le GM ouvre une chasse, trouve la cible en jeu, photographie la rencontre et transmets avant la fin de la fenetre.</div>
+        <div id="chasse-active-wrap"></div>
+        <div id="chasse-empty" class="list-empty">Aucune chasse ouverte pour le moment. Restez en alerte.</div>
+      </section>
+
+      <!-- CHAT -->
+      <section class="view" id="view-chat">
+        <div class="section-title">Canal Game Master</div>
+        <div class="section-sub">Ligne directe et chiffree avec le GM. Vous ne parlez qu'avec lui.</div>
+        <div class="chat">
+          <div class="chat-log" id="chat-log"></div>
+          <form class="chat-input" id="chat-form">
+            <input type="text" id="chat-input" placeholder="Message au GM..." autocomplete="off" />
+            <button class="btn primary" type="submit">Envoyer</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- CLASSEMENT -->
+      <section class="view" id="view-classement">
+        <div class="section-title">Classement</div>
+        <div class="section-sub" id="rank-sub">Classement live de la manche en cours.</div>
+        <div class="rank-list" id="rank-list"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- =================== ECRAN OUT =================== -->
+  <div id="out-screen" class="out-screen" style="display:none">
+    <div class="scan-overlay"></div>
+    <div class="out-frame">DOSSIER CLOS</div>
+    <div class="glitch" data-text="OUT">OUT</div>
+    <div class="out-sub">Vous etes hors jeu</div>
+    <div class="out-sub-2">Votre cellule a ete eliminee du PROTOCOLE OMERTA. Les acces sont revoques. Coupez tout contact et attendez les instructions du Game Master.</div>
+  </div>
+
+  <script type="module" src="js/group-app.js"></script>
+</body>
+</html>

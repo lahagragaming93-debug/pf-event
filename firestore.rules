@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// =====================================================================
+// PROTOCOLE OMERTA - Regles Firestore
+// ---------------------------------------------------------------------
+// Principe anti-triche:
+//  - Tout le monde doit etre authentifie (anonyme) pour lire.
+//  - Un GROUPE ne peut ECRIRE QUE ses propres preuves et ses messages.
+//  - Les POINTS, le STATUT, la PROGRESSION et les VALIDATIONS sont
+//    en LECTURE SEULE pour les groupes, modifiables UNIQUEMENT par le GM.
+//  - Le GM = uid present dans config/admins.uids.
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/config/admins)
+        && get(/databases/$(database)/documents/config/admins).data.uids[request.auth.uid] == true;
+    }
+
+    function isMember(gid) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/groups/$(gid))
+        && (request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.memberUids);
+    }
+
+    // ---------------- config ----------------
+    match /config/event {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /config/admins {
+      // Lecture reservee aux admins (contient l'allowlist + mdp admin).
+      // Le tout premier uid s'ajoute via la console Firebase (bypass des regles).
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+    match /config/{other} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------------- objectifs (GM only en ecriture) ----------------
+    match /objectives/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------------- chasses (GM only en ecriture) ----------------
+    match /chasses/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------------- groupes ----------------
+    match /groups/{gid} {
+      // Lecture par tout utilisateur connecte (classement + login + dashboard).
+      allow read: if isSignedIn();
+
+      // Creation / suppression: GM uniquement.
+      allow create, delete: if isAdmin();
+
+      // Mise a jour:
+      //  - GM: tout (points, statut, progression, mdp...).
+      //  - Groupe: UNIQUEMENT s'inscrire dans memberUids (login), sans rien
+      //    retirer et sans toucher au moindre autre champ.
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberUids'])
+          && request.resource.data.memberUids.hasAll(resource.data.memberUids)
+          && (request.auth.uid in request.resource.data.memberUids)
+        );
+
+      // ------- preuves -------
+      match /submissions/{sid} {
+        allow read: if isAdmin() || isMember(gid);
+
+        // Le groupe CREE sa preuve, mais ne peut pas s'auto-attribuer de points
+        // ni se marquer "validee": statut limite, points a 0, non credite.
+        allow create: if isMember(gid)
+          && request.resource.data.status in ['pending', 'late']
+          && request.resource.data.points == 0
+          && request.resource.data.credited == false
+          && request.resource.data.type in ['photo', 'chasse'];
+
+        // Validation / refus / suppression: GM uniquement.
+        allow update, delete: if isAdmin();
+      }
+
+      // ------- messages -------
+      match /messages/{mid} {
+        allow read: if isAdmin() || isMember(gid);
+        allow create: if (isAdmin() && request.resource.data.sender == 'gm')
+          || (isMember(gid) && request.resource.data.sender == 'group');
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // Tout le reste: ferme par defaut.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

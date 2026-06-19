@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// =====================================================================
+// PROTOCOLE OMERTA - Regles Firebase Storage
+// ---------------------------------------------------------------------
+// Storage ne peut pas lire Firestore: securite legere (RP).
+//  - Lecture: tout utilisateur authentifie (anonyme inclus).
+//  - Ecriture des preuves: utilisateur authentifie, images < 10 Mo.
+//  - Photos de chasse (lieux): uploadees par le GM (authentifie).
+//  - Suppression: utilisateur authentifie (le GM, via le cockpit).
+// Les POINTS ne dependent jamais des fichiers: ils sont en LECTURE SEULE
+// cote groupe dans Firestore. Une image ne peut donc rien "tricher".
+// =====================================================================
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isImageUnder10Mo() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Preuves soumises par les groupes
+    match /submissions/{groupId}/{fileName=**} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isImageUnder10Mo();
+      allow delete: if isSignedIn();
+    }
+
+    // Photos de lieux pour les chasses (uploadees par le GM)
+    match /chasses/{fileName=**} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isImageUnder10Mo();
+      allow delete: if isSignedIn();
+    }
+
+    // Tout le reste: ferme.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
