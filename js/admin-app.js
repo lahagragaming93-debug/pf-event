@@ -16,7 +16,8 @@ import { seedObjectives, seedChasses } from "./objectives.js";
 import {
   EVENT_NAME, STATUS, STATUS_LABEL, EVENT_STATUS, SUB_STATUS, SUB_STATUS_LABEL, OBJ_TYPE,
   DEFAULT_EVENT, escapeHtml, formatHud, remainingMs, fmtDateTime, tsToMs,
-  generatePassword, toast, modalConfirm, modalPrompt, wirePasteZone
+  generatePassword, toast, modalConfirm, modalPrompt, wirePasteZone,
+  saveAdminSession, getAdminSession, clearAdminSession
 } from "./common.js";
 
 // --- Etat ----------------------------------------------------------------
@@ -65,7 +66,13 @@ let chasseBlob = null;   // image en attente pour creation de chasse
     return;
   }
 
-  // Autorise -> demande le mot de passe admin (2e barriere)
+  // Autorise. Si deja deverrouille sur ce navigateur -> entree directe (session permanente).
+  if (getAdminSession() && getAdminSession().unlocked) {
+    startCockpit();
+    return;
+  }
+
+  // Sinon, demande le mot de passe admin une fois (2e barriere).
   body.innerHTML = `
     <form id="admin-pass-form" autocomplete="off">
       <label class="field"><span>Mot de passe Game Master</span>
@@ -77,7 +84,7 @@ let chasseBlob = null;   // image en attente pour creation de chasse
     e.preventDefault();
     const pass = document.getElementById("admin-pass").value;
     const r = await adminPasswordOk(pass);
-    if (r.ok) startCockpit();
+    if (r.ok) { saveAdminSession({ unlocked: true }); startCockpit(); }
     else document.getElementById("admin-pass-error").textContent = "Mot de passe incorrect.";
   });
 })();
@@ -118,7 +125,7 @@ async function startCockpit() {
   });
 
   startCountdown();
-  document.getElementById("gm-logout").addEventListener("click", () => location.reload());
+  document.getElementById("gm-logout").addEventListener("click", () => { clearAdminSession(); location.reload(); });
 }
 
 // =====================================================================
@@ -408,10 +415,9 @@ function switchMode(mode) {
 // =====================================================================
 // PANNEAU GROUPE SELECTIONNE
 // =====================================================================
-async function selectGroup(gid) {
+function selectGroup(gid) {
   selectedGroupId = gid;
-  // Marque les messages comme lus
-  try { await updateDoc(doc(db, "groups", gid), { lastReadByGm: serverTimestamp() }); } catch {}
+  // Le marquage "lu" est gere par updateGroupChat (evite la double ecriture).
   switchMode("group");
   renderSidebar();
 }
@@ -581,8 +587,12 @@ function updateGroupChat(gid) {
     log.appendChild(el);
   });
   log.scrollTop = log.scrollHeight;
-  // marque comme lus puisque le panneau est ouvert (uniquement s'il y a du non-lu)
+  // marque comme lus puisque le panneau est ouvert (uniquement s'il y a du non-lu).
+  // IMPORTANT: on met unread a 0 AVANT l'ecriture pour casser toute boucle
+  // (sinon chaque snapshot groups re-declenche une ecriture -> gel de l'ecran).
   if (selectedGroupId === gid && groupCache[gid] && groupCache[gid].unread > 0) {
+    groupCache[gid].unread = 0;
+    renderSidebar();
     updateDoc(doc(db, "groups", gid), { lastReadByGm: serverTimestamp() }).catch(() => {});
   }
 }

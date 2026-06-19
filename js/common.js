@@ -127,12 +127,12 @@ export function getGroupSession() {
 export function clearGroupSession() { localStorage.removeItem(GROUP_KEY); }
 
 export function saveAdminSession(data) {
-  sessionStorage.setItem(ADMIN_KEY, JSON.stringify(data));
+  localStorage.setItem(ADMIN_KEY, JSON.stringify(data));
 }
 export function getAdminSession() {
-  try { return JSON.parse(sessionStorage.getItem(ADMIN_KEY)); } catch { return null; }
+  try { return JSON.parse(localStorage.getItem(ADMIN_KEY)); } catch { return null; }
 }
-export function clearAdminSession() { sessionStorage.removeItem(ADMIN_KEY); }
+export function clearAdminSession() { localStorage.removeItem(ADMIN_KEY); }
 
 // =====================================================================
 // Generateur de mot de passe (codes lisibles, ton clandestin)
