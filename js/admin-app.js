@@ -664,29 +664,47 @@ function updateGroupChat(gid) {
   }
 }
 
-// Fiche identite privee (nom/prenom/tel/CNI) - GM only
+// Fiche identite privee EDITABLE (nom/prenom/tel/armes/notes/CNI) - GM only
 async function loadIdentity(gid) {
   const el = document.getElementById("gp-identity");
   if (!el) return;
   el.innerHTML = `<div class="id-head">Fiche cellule (prive)</div><div class="dim tiny">Chargement...</div>`;
+  let d = {};
   try {
     const snap = await getDoc(doc(db, "groups", gid, "private", "identity"));
-    if (!snap.exists()) {
-      el.innerHTML = `<div class="id-head">Fiche cellule (prive - GM only)</div><div class="dim tiny">Aucune fiche enregistree pour cette cellule.</div>`;
-      return;
-    }
-    const d = snap.data();
-    el.innerHTML = `
-      <div class="id-head">Fiche cellule (prive - GM only)</div>
-      <div class="kvp"><span>Nom</span><b>${escapeHtml(d.nom || "-")}</b></div>
-      <div class="kvp"><span>Prenom</span><b>${escapeHtml(d.prenom || "-")}</b></div>
-      <div class="kvp"><span>Telephone</span><b>${escapeHtml(d.telephone || "-")}</b></div>
-      ${d.idCardUrl
-        ? `<img class="id-thumb" src="${escapeHtml(d.idCardUrl)}" data-action="view-img" data-url="${escapeHtml(d.idCardUrl)}" alt="carte d'identite" />`
-        : `<div class="dim tiny" style="margin-top:0.4rem">Pas de carte d'identite enregistree.</div>`}`;
-  } catch (e) {
-    el.innerHTML = `<div class="id-head">Fiche cellule</div><div class="danger-txt tiny">Erreur de chargement.</div>`;
-  }
+    if (snap.exists()) d = snap.data();
+  } catch (e) { /* ignore */ }
+  el.innerHTML = `
+    <div class="card-head"><h3>Fiche cellule (prive - GM only)</h3>
+      <button class="btn primary sm" data-action="save-identity" data-gid="${gid}">Enregistrer</button></div>
+    <div class="row">
+      <label class="field"><span>Nom</span><input type="text" id="id-nom" value="${escapeHtml(d.nom || "")}" /></label>
+      <label class="field"><span>Prenom</span><input type="text" id="id-prenom" value="${escapeHtml(d.prenom || "")}" /></label>
+    </div>
+    <div class="row">
+      <label class="field"><span>Telephone (IG)</span><input type="text" id="id-tel" value="${escapeHtml(d.telephone || "")}" /></label>
+      <label class="field" style="flex:0 0 130px"><span>Nb d'armes</span><input type="number" id="id-armes" min="0" value="${d.armes != null ? d.armes : ""}" /></label>
+    </div>
+    <label class="field"><span>Infos perso / notes</span><textarea id="id-notes" rows="3" placeholder="Notes libres: contacts, planques, etat des armes...">${escapeHtml(d.notes || "")}</textarea></label>
+    ${d.idCardUrl
+      ? `<img class="id-thumb" src="${escapeHtml(d.idCardUrl)}" data-action="view-img" data-url="${escapeHtml(d.idCardUrl)}" alt="carte d'identite" />`
+      : `<div class="dim tiny" style="margin-top:0.4rem">Pas de carte d'identite (ajoutable a la creation de la cellule).</div>`}`;
+}
+
+async function saveIdentity(gid) {
+  const armesRaw = document.getElementById("id-armes").value;
+  const patch = {
+    nom: (document.getElementById("id-nom").value || "").trim(),
+    prenom: (document.getElementById("id-prenom").value || "").trim(),
+    telephone: (document.getElementById("id-tel").value || "").trim(),
+    armes: armesRaw === "" ? 0 : (parseInt(armesRaw, 10) || 0),
+    notes: (document.getElementById("id-notes").value || "").trim(),
+    updatedAt: serverTimestamp()
+  };
+  try {
+    await setDoc(doc(db, "groups", gid, "private", "identity"), patch, { merge: true });
+    toast("Fiche cellule enregistree.", "success");
+  } catch (e) { console.error(e); toast("Echec de l'enregistrement.", "error"); }
 }
 
 // =====================================================================
@@ -1293,6 +1311,7 @@ function wireGlobalHandlers() {
       case "reveal-pass": revealPass(gid); break;
       case "regen-pass": regenPass(gid); break;
       case "del-group": delGroup(gid); break;
+      case "save-identity": saveIdentity(gid); break;
       case "obj-edit": editObjective(id); break;
       case "obj-del": delObjective(id); break;
       case "seed-obj": doSeedObjectives(); break;
