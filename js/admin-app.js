@@ -1053,7 +1053,8 @@ function renderChassesAdmin() {
 async function createChasse() {
   const label = document.getElementById("ch-label").value.trim();
   const manche = parseInt(document.getElementById("ch-m").value, 10);
-  const points = parseInt(document.getElementById("ch-pts").value, 10) || 100;
+  const ptsRaw = parseInt(document.getElementById("ch-pts").value, 10);
+  const points = isNaN(ptsRaw) ? 0 : Math.max(0, ptsRaw);
   const winRaw = parseInt(document.getElementById("ch-win").value, 10);
   const win = isNaN(winRaw) ? 0 : Math.max(0, winRaw);   // 0 = sans limite
   if (!label) { toast("Titre requis.", "error"); return; }
