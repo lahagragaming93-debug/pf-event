@@ -496,6 +496,23 @@ textarea { resize: vertical; min-height: 70px; }
 
 .password-reveal { font-family: var(--mono); color: var(--term); background:#060a0f; border:1px solid var(--line-2); padding: 0.2rem 0.5rem; border-radius: 3px; letter-spacing: 0.1em; }
 
+/* Diffusion a tous (header GM) */
+.broadcast { display: flex; gap: 0.4rem; flex: 1 1 240px; max-width: 540px; min-width: 0; }
+.broadcast input { flex: 1; min-width: 0; }
+
+/* Fiche identite cellule (GM only) */
+.id-card { border: 1px solid var(--line-2); border-radius: var(--radius); padding: 0.8rem; margin-top: 0.8rem; background: #060a0f; }
+.id-card .id-head { font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--warn); margin-bottom: 0.5rem; }
+.id-thumb { max-width: 240px; width: 100%; border: 1px solid var(--line-2); border-radius: var(--radius); cursor: zoom-in; margin-top: 0.5rem; background:#000; }
+
+/* Encadre regles du jeu */
+.rules-box {
+  white-space: pre-wrap; line-height: 1.65; color: var(--txt); font-size: 0.95rem;
+  background: linear-gradient(180deg, var(--panel), var(--bg-2));
+  border: 1px solid var(--line-2); border-radius: 6px; padding: 1.3rem;
+}
+.rules-edit { width: 100%; min-height: 60vh; font-size: 0.92rem; line-height: 1.6; }
+
 .mini-thumb { width: 64px; height: 48px; object-fit: cover; border:1px solid var(--line-2); border-radius:3px; cursor: zoom-in; background:#000; }
 
 .sub-row { display: flex; gap: 0.7rem; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid var(--line); }

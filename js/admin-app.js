@@ -35,6 +35,33 @@ const groupCache = {};   // gid -> { submissions:[], messages:[], pending:n, unr
 const badgeUnsubs = {};  // gid -> [unsub...]
 
 let chasseBlob = null;   // image en attente pour creation de chasse
+let cgIdBlob = null;     // image carte d'identite en attente (creation groupe)
+
+// Regles par defaut (editables depuis le cockpit, vues par les groupes)
+const DEFAULT_RULES = `PROTOCOLE OMERTA // REGLES DU JEU
+
+Bienvenue dans le reseau. 12 cellules entrent, une seule logique : survivre et marquer.
+
+MANCHE 1 - LIVRAISONS (24h)
+Ramenez en jeu la liste d'objets demandee. Le Game Master enregistre vos livraisons.
+Les 8 premieres cellules a tout livrer sont QUALIFIEES.
+Des que 8 cellules ont tout livre, les autres sont eliminees (ecran OUT, acces verrouille).
+
+MANCHE 2 - INFILTRATION (48h)
+Marquez un maximum de points via les objectifs photo et les chasses.
+- Objectifs UNIQUES : valables une seule fois (ex : braquage Fleeca, tag du poste, vehicule de police).
+- Objectifs CUMULABLES : repetables, chaque preuve differente rapporte (leader / membre rival).
+- CHASSES : fenetres chronometrees. Rendez-vous sur le lieu indique, faites une photo avec la personne sur place, et transmettez la AVANT la fin de la fenetre. Apres fermeture, plus aucun point.
+A la cloture, le TOP 4 accede a la finale, le reste est OUT.
+
+MANCHE 3 - FINALE
+Les 4 cellules restantes s'affrontent. Les 3 premieres remportent les lots, la 4e est eliminee.
+
+PREUVES
+Capture d'ecran a coller (Ctrl+V) ou fichier. Le GM valide ou refuse. Les points sont attribues par le GM uniquement.
+
+FAIR-PLAY
+Pas de triche. En cas de litige, la decision du Game Master est finale. Tout contact passe par le chat GM.`;
 
 // =====================================================================
 // BOOT + barriere admin
@@ -102,10 +129,17 @@ async function startCockpit() {
   if (!evSnap.exists()) {
     await setDoc(evRef, DEFAULT_EVENT);
   }
+  // Cree config/rules si absent
+  const rulesRef = doc(db, "config", "rules");
+  const rulesSnap = await getDoc(rulesRef);
+  if (!rulesSnap.exists()) {
+    await setDoc(rulesRef, { text: DEFAULT_RULES, updatedAt: serverTimestamp() });
+  }
 
   wireGlobalHandlers();
   wireEventBar();
   wireModes();
+  wireBroadcast();
 
   // Listeners
   onSnapshot(evRef, (s) => { eventCfg = s.exists() ? s.data() : null; onEventChange(); });
@@ -398,10 +432,34 @@ function wireModes() {
     t.addEventListener("click", () => switchMode(t.dataset.mode));
   });
 }
+
+// Diffusion d'un message a toutes les cellules actives
+function wireBroadcast() {
+  const btn = document.getElementById("broadcast-btn");
+  const input = document.getElementById("broadcast-input");
+  if (!btn || !input) return;
+  const send = async () => {
+    const text = input.value.trim();
+    if (!text) return;
+    const targets = allGroups.filter((g) => g.status !== STATUS.OUT);
+    if (!targets.length) { toast("Aucune cellule active.", "error"); return; }
+    btn.disabled = true;
+    try {
+      for (const g of targets) {
+        await addDoc(collection(db, "groups", g.id, "messages"), { sender: "gm", text, createdAt: serverTimestamp() });
+      }
+      input.value = "";
+      toast(`Message diffuse a ${targets.length} cellule(s).`, "success");
+    } catch (e) { console.error(e); toast("Echec de la diffusion.", "error"); }
+    finally { btn.disabled = false; }
+  };
+  btn.addEventListener("click", send);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+}
 function switchMode(mode) {
   currentMode = mode;
   document.querySelectorAll("#gm-modes .tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === mode));
-  ["group", "objectives", "chasses", "classement", "out", "create"].forEach((md) => {
+  ["group", "objectives", "chasses", "classement", "out", "create", "rules"].forEach((md) => {
     document.getElementById("mode-" + md).style.display = (md === mode) ? "block" : "none";
   });
   if (mode === "group") renderModeGroup();
@@ -410,6 +468,7 @@ function switchMode(mode) {
   if (mode === "classement") renderClassementAdmin();
   if (mode === "out") renderOutAdmin();
   if (mode === "create") renderCreateAdmin();
+  if (mode === "rules") renderRulesAdmin();
 }
 
 // =====================================================================
@@ -432,6 +491,7 @@ function renderModeGroup() {
   if (renderedGroupId !== selectedGroupId) {
     buildGroupSkeleton(selectedGroupId);
     renderedGroupId = selectedGroupId;
+    loadIdentity(selectedGroupId);
   }
   updateGroupMeta(selectedGroupId);
   updateGroupQty(selectedGroupId);
@@ -445,6 +505,7 @@ function buildGroupSkeleton(gid) {
     <div class="gm-grid cols-2">
       <div>
         <div id="gp-meta" class="card" style="margin-bottom:1rem"></div>
+        <div id="gp-identity" class="card" style="margin-bottom:1rem"></div>
         <div id="gp-qty" class="card" style="margin-bottom:1rem"></div>
         <div id="gp-points" class="card"></div>
       </div>
@@ -495,9 +556,14 @@ function updateGroupMeta(gid) {
       <button class="btn danger sm" data-action="del-group" data-gid="${gid}" style="flex:0 0 auto">Supprimer la cellule</button>
     </div>`;
 
-  // Bloc points manuel
+  // Bloc points manuel - masque en Manche 1 (qui se joue a l'ordre de completion, pas aux points)
   const pts = document.getElementById("gp-points");
-  pts.innerHTML = `
+  if (m === 1) {
+    pts.style.display = "none";
+    pts.innerHTML = "";
+  } else {
+    pts.style.display = "block";
+    pts.innerHTML = `
     <div class="card-head"><h3>Points Manche ${m}</h3><span class="neon" style="font-family:var(--display);font-size:1.3rem">${g.points?.[m] || 0}</span></div>
     <div class="row">
       <button class="btn sm" data-action="points-adj" data-gid="${gid}" data-delta="-50">-50</button>
@@ -507,6 +573,7 @@ function updateGroupMeta(gid) {
       <button class="btn sm primary" data-action="points-set" data-gid="${gid}" style="flex:0 0 auto">Definir</button>
     </div>
     <div class="tiny mute" style="margin-top:0.5rem">Ajustement manuel. La validation des preuves credite automatiquement.</div>`;
+  }
 }
 
 function updateGroupQty(gid) {
@@ -594,6 +661,31 @@ function updateGroupChat(gid) {
     groupCache[gid].unread = 0;
     renderSidebar();
     updateDoc(doc(db, "groups", gid), { lastReadByGm: serverTimestamp() }).catch(() => {});
+  }
+}
+
+// Fiche identite privee (nom/prenom/tel/CNI) - GM only
+async function loadIdentity(gid) {
+  const el = document.getElementById("gp-identity");
+  if (!el) return;
+  el.innerHTML = `<div class="id-head">Fiche cellule (prive)</div><div class="dim tiny">Chargement...</div>`;
+  try {
+    const snap = await getDoc(doc(db, "groups", gid, "private", "identity"));
+    if (!snap.exists()) {
+      el.innerHTML = `<div class="id-head">Fiche cellule (prive - GM only)</div><div class="dim tiny">Aucune fiche enregistree pour cette cellule.</div>`;
+      return;
+    }
+    const d = snap.data();
+    el.innerHTML = `
+      <div class="id-head">Fiche cellule (prive - GM only)</div>
+      <div class="kvp"><span>Nom</span><b>${escapeHtml(d.nom || "-")}</b></div>
+      <div class="kvp"><span>Prenom</span><b>${escapeHtml(d.prenom || "-")}</b></div>
+      <div class="kvp"><span>Telephone</span><b>${escapeHtml(d.telephone || "-")}</b></div>
+      ${d.idCardUrl
+        ? `<img class="id-thumb" src="${escapeHtml(d.idCardUrl)}" data-action="view-img" data-url="${escapeHtml(d.idCardUrl)}" alt="carte d'identite" />`
+        : `<div class="dim tiny" style="margin-top:0.4rem">Pas de carte d'identite enregistree.</div>`}`;
+  } catch (e) {
+    el.innerHTML = `<div class="id-head">Fiche cellule</div><div class="danger-txt tiny">Erreur de chargement.</div>`;
   }
 }
 
@@ -758,6 +850,14 @@ async function deleteGroupDeep(gid) {
     }
     const msgSnap = await getDocs(collection(db, "groups", gid, "messages"));
     for (const d of msgSnap.docs) await deleteDoc(d.ref);
+    // Fiche identite privee + carte d'identite Storage
+    try {
+      const idSnap = await getDoc(doc(db, "groups", gid, "private", "identity"));
+      if (idSnap.exists() && idSnap.data().idCardStoragePath) {
+        try { await deleteObject(storageRef(storage, idSnap.data().idCardStoragePath)); } catch {}
+      }
+      await deleteDoc(doc(db, "groups", gid, "private", "identity"));
+    } catch {}
   } catch (e) { console.warn("nettoyage sous-collections", e); }
   await deleteDoc(doc(db, "groups", gid));
 }
@@ -1049,20 +1149,46 @@ async function purgeOut() {
 // =====================================================================
 function renderCreateAdmin() {
   const wrap = document.getElementById("mode-create");
+  cgIdBlob = null;
   wrap.innerHTML = `
-    <div class="card" style="max-width:480px">
+    <div class="card" style="max-width:580px">
       <div class="card-head"><h3>Creer une cellule</h3></div>
       <form id="create-group-form" autocomplete="off">
-        <label class="field"><span>Nom du groupe</span><input type="text" id="cg-name" placeholder="ex: Les Corbeaux" required /></label>
+        <label class="field"><span>Nom du groupe (sert au login)</span><input type="text" id="cg-name" placeholder="ex: Les Corbeaux" required /></label>
         <label class="field"><span>Code d'acces</span>
           <div class="row"><input type="text" id="cg-pass" placeholder="auto-genere" />
           <button type="button" class="btn ghost" id="cg-gen" style="flex:0 0 auto">Generer</button></div>
         </label>
-        <button class="btn primary block" type="submit">Creer la cellule</button>
+
+        <div class="id-head" style="margin-top:0.6rem">Fiche joueur (privee - GM only)</div>
+        <div class="row">
+          <label class="field"><span>Nom</span><input type="text" id="cg-nom" /></label>
+          <label class="field"><span>Prenom</span><input type="text" id="cg-prenom" /></label>
+        </div>
+        <label class="field"><span>Telephone (IG)</span><input type="text" id="cg-tel" placeholder="ex: 555-1234" /></label>
+
+        <div class="field"><span>Carte d'identite (copier-coller / fichier)</span>
+          <div class="paste-zone" id="cg-id-paste" tabindex="0">
+            <div class="pz-icon">[ + ]</div>
+            <div class="pz-hint">Colle (<span class="pz-kbd">Ctrl+V</span>) ou choisis l'image de la CNI</div>
+            <input type="file" id="cg-id-file" accept="image/*" style="display:none" />
+            <button type="button" class="btn ghost sm" id="cg-id-btn" style="margin-top:0.6rem">Choisir un fichier</button>
+          </div>
+          <img id="cg-id-preview" class="preview-img" style="display:none" alt="apercu CNI" />
+        </div>
+
+        <button class="btn primary block" type="submit" style="margin-top:0.6rem">Creer la cellule</button>
       </form>
-      <div class="tiny mute" style="margin-top:0.8rem">Astuce: laisse le code vide pour generer un code automatiquement.</div>
+      <div class="tiny mute" style="margin-top:0.8rem">Code vide = genere automatiquement. La fiche joueur n'est visible que par toi.</div>
     </div>`;
   document.getElementById("cg-gen").addEventListener("click", () => { document.getElementById("cg-pass").value = generatePassword(); });
+  const fileInput = document.getElementById("cg-id-file");
+  document.getElementById("cg-id-btn").addEventListener("click", (e) => { e.stopPropagation(); fileInput.click(); });
+  wirePasteZone(document.getElementById("cg-id-paste"), fileInput, (blob, dataUrl) => {
+    cgIdBlob = blob;
+    const p = document.getElementById("cg-id-preview"); p.src = dataUrl; p.style.display = "block";
+    toast("Carte d'identite prete.", "success");
+  });
   document.getElementById("create-group-form").addEventListener("submit", createGroup);
 }
 
@@ -1077,16 +1203,72 @@ async function createGroup(e) {
   if (allGroups.some((g) => (g.nameLower || g.name?.toLowerCase()) === name.toLowerCase())) {
     toast("Un groupe porte deja ce nom.", "error"); return;
   }
-  await addDoc(collection(db, "groups"), {
-    name, nameLower: name.toLowerCase(), password: pass,
-    status: STATUS.ACTIVE, memberUids: [],
-    manche1Progress: {}, points: { 1: 0, 2: 0, 3: 0 },
-    completedAt: null, completionRank: null, eliminatedAt: null,
-    lastReadByGm: serverTimestamp(), createdAt: serverTimestamp()
+
+  const btn = document.querySelector("#create-group-form button[type=submit]");
+  if (btn) { btn.disabled = true; btn.textContent = "Creation..."; }
+  try {
+    const ref = await addDoc(collection(db, "groups"), {
+      name, nameLower: name.toLowerCase(), password: pass,
+      status: STATUS.ACTIVE, memberUids: [],
+      manche1Progress: {}, points: { 1: 0, 2: 0, 3: 0 },
+      completedAt: null, completionRank: null, eliminatedAt: null,
+      lastReadByGm: serverTimestamp(), createdAt: serverTimestamp()
+    });
+
+    // Fiche identite privee (GM only) + upload carte d'identite
+    const nom = (document.getElementById("cg-nom").value || "").trim();
+    const prenom = (document.getElementById("cg-prenom").value || "").trim();
+    const tel = (document.getElementById("cg-tel").value || "").trim();
+    let idCardUrl = "", idCardStoragePath = "";
+    if (cgIdBlob) {
+      const ext = (cgIdBlob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+      idCardStoragePath = `identity/${ref.id}/cni_${Date.now()}.${ext}`;
+      const sref = storageRef(storage, idCardStoragePath);
+      await uploadBytes(sref, cgIdBlob, { contentType: cgIdBlob.type });
+      idCardUrl = await getDownloadURL(sref);
+    }
+    await setDoc(doc(db, "groups", ref.id, "private", "identity"), {
+      nom, prenom, telephone: tel, idCardUrl, idCardStoragePath, updatedAt: serverTimestamp()
+    });
+
+    toast(`Cellule "${name}" creee. Code: ${pass}`, "success");
+    document.getElementById("cg-name").value = "";
+    document.getElementById("cg-pass").value = "";
+    document.getElementById("cg-nom").value = "";
+    document.getElementById("cg-prenom").value = "";
+    document.getElementById("cg-tel").value = "";
+    const prev = document.getElementById("cg-id-preview"); if (prev) { prev.src = ""; prev.style.display = "none"; }
+    cgIdBlob = null;
+  } catch (ex) {
+    console.error(ex); toast("Echec de la creation.", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Creer la cellule"; }
+  }
+}
+
+// =====================================================================
+// MODE REGLES DU JEU (editeur GM)
+// =====================================================================
+async function renderRulesAdmin() {
+  const wrap = document.getElementById("mode-rules");
+  wrap.innerHTML = `
+    <div class="card">
+      <div class="card-head"><h3>Regles du jeu (visibles par les cellules)</h3>
+        <button class="btn primary sm" id="rules-save">Enregistrer</button></div>
+      <div class="dim tiny" style="margin-bottom:0.6rem">Ce texte s'affiche en temps reel dans l'onglet "Regles du jeu" de chaque cellule.</div>
+      <textarea class="rules-edit" id="rules-text" placeholder="Ecris les regles ici..."></textarea>
+    </div>`;
+  const ta = document.getElementById("rules-text");
+  try {
+    const snap = await getDoc(doc(db, "config", "rules"));
+    ta.value = snap.exists() ? (snap.data().text || "") : "";
+  } catch (e) { /* ignore */ }
+  document.getElementById("rules-save").addEventListener("click", async () => {
+    try {
+      await setDoc(doc(db, "config", "rules"), { text: ta.value, updatedAt: serverTimestamp() }, { merge: true });
+      toast("Regles enregistrees et diffusees.", "success");
+    } catch (e) { console.error(e); toast("Echec de l'enregistrement.", "error"); }
   });
-  toast(`Cellule "${name}" creee. Code: ${pass}`, "success");
-  document.getElementById("cg-name").value = "";
-  document.getElementById("cg-pass").value = "";
 }
 
 // =====================================================================

@@ -37,6 +37,14 @@ service firebase.storage {
       allow delete: if isSignedIn();
     }
 
+    // Cartes d'identite (uploadees par le GM, archive privee).
+    // L'URL n'est stockee que dans le doc Firestore GM-only.
+    match /identity/{groupId}/{fileName=**} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isImageUnder10Mo();
+      allow delete: if isSignedIn();
+    }
+
     // Tout le reste: ferme.
     match /{allPaths=**} {
       allow read, write: if false;

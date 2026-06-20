@@ -98,6 +98,12 @@ function startApp(groupId) {
     renderClassement();
   });
 
+  // Regles du jeu (temps reel)
+  unsub.rules = onSnapshot(doc(db, "config", "rules"), (snap) => {
+    const box = document.getElementById("rules-box");
+    if (box) box.textContent = (snap.exists() && snap.data().text) ? snap.data().text : "Aucune regle publiee pour le moment.";
+  });
+
   // Objectifs
   unsub.obj = onSnapshot(collection(db, "objectives"), (snap) => {
     allObjectives = snap.docs.map((d) => ({ id: d.id, ...d.data() }))

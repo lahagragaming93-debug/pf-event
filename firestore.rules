@@ -101,6 +101,12 @@ service cloud.firestore {
           || (isMember(gid) && request.resource.data.sender == 'group');
         allow update, delete: if isAdmin();
       }
+
+      // Donnees privees (identite, contact, carte d'identite): GM UNIQUEMENT.
+      // Jamais lisibles par les groupes.
+      match /private/{doc} {
+        allow read, write: if isAdmin();
+      }
     }
 
     // Tout le reste: ferme par defaut.

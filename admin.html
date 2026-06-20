@@ -35,6 +35,10 @@
           <div class="codename">// COCKPIT GAME MASTER</div>
         </div>
       </div>
+      <div class="broadcast">
+        <input type="text" id="broadcast-input" placeholder="Message a TOUTES les cellules..." autocomplete="off" />
+        <button class="btn sm primary" id="broadcast-btn">Diffuser</button>
+      </div>
       <div class="topbar-right">
         <div class="mini-chrono" id="gm-chrono">--:--:--</div>
         <button class="btn ghost sm" id="gm-logout">Quitter</button>
@@ -74,6 +78,7 @@
       <button class="tab" data-mode="classement">Classement</button>
       <button class="tab" data-mode="out">Section OUT</button>
       <button class="tab" data-mode="create">Creer un groupe</button>
+      <button class="tab" data-mode="rules">Regles du jeu</button>
     </nav>
 
     <div class="gm-layout">
@@ -94,6 +99,7 @@
         <div id="mode-classement" style="display:none"></div>
         <div id="mode-out" style="display:none"></div>
         <div id="mode-create" style="display:none"></div>
+        <div id="mode-rules" style="display:none"></div>
       </main>
     </div>
   </div>
