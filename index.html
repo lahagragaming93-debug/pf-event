@@ -164,6 +164,20 @@
     <div class="out-sub-2">Votre cellule a ete eliminee du PROTOCOLE OMERTA. Les acces sont revoques. Coupez tout contact et attendez les instructions du Game Master.</div>
   </div>
 
+  <!-- =================== OVERLAY QUIZ (Epreuve 2) =================== -->
+  <div id="quiz-overlay" class="quiz-overlay" style="display:none">
+    <div class="quiz-card">
+      <div class="quiz-head"><span class="live-dot"></span>QUESTION EN DIRECT</div>
+      <div class="quiz-timer" id="quiz-timer">5</div>
+      <div class="quiz-q" id="quiz-q"></div>
+      <form id="quiz-form" autocomplete="off">
+        <input type="text" id="quiz-answer" placeholder="Ta reponse..." autocomplete="off" />
+        <button class="btn primary block" type="submit" id="quiz-send">Repondre</button>
+      </form>
+      <div class="quiz-status" id="quiz-status"></div>
+    </div>
+  </div>
+
   <script type="module" src="js/group-app.js"></script>
 </body>
 </html>

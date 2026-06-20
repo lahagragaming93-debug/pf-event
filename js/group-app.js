@@ -4,7 +4,7 @@
 
 import {
   db, storage, ensureAuth, currentUid,
-  doc, collection, query, where, orderBy,
+  doc, setDoc, collection, query, where, orderBy,
   onSnapshot, addDoc, serverTimestamp,
   storageRef, uploadBytes, getDownloadURL
 } from "./firebase-init.js";
@@ -26,7 +26,12 @@ let allGroups = [];
 let mySubmissions = [];
 let pendingBlob = null;
 
-let unsub = { group: null, event: null, obj: null, chasses: null, groups: null, subs: null, msgs: null };
+// Quiz (Epreuve 2)
+let quizState = null;
+let quizTimer = null;
+let quizShownQid = null;
+
+let unsub = { group: null, event: null, rules: null, quiz: null, obj: null, chasses: null, groups: null, subs: null, msgs: null };
 
 // =====================================================================
 // Boot
@@ -72,6 +77,7 @@ function startApp(groupId) {
   wireTabs();
   wireProof();
   wireChat();
+  wireQuiz();
   document.getElementById("logout-btn").addEventListener("click", groupLogout);
 
   // Listener doc groupe (statut OUT, points, progression)
@@ -84,6 +90,7 @@ function startApp(groupId) {
     myGroup = { id: snap.id, ...snap.data() };
     document.getElementById("top-group-name").textContent = myGroup.name || "";
     checkOut();
+    handleQuiz();
     renderObjectives();
     renderClassement();
   });
@@ -102,6 +109,12 @@ function startApp(groupId) {
   unsub.rules = onSnapshot(doc(db, "config", "rules"), (snap) => {
     const box = document.getElementById("rules-box");
     if (box) box.textContent = (snap.exists() && snap.data().text) ? snap.data().text : "Aucune regle publiee pour le moment.";
+  });
+
+  // Quiz live (Epreuve 2) - overlay question
+  unsub.quiz = onSnapshot(doc(db, "config", "quiz"), (snap) => {
+    quizState = snap.exists() ? snap.data() : null;
+    handleQuiz();
   });
 
   // Objectifs
@@ -604,6 +617,84 @@ function renderClassement() {
       ${scoreHtml}`;
     list.appendChild(el);
   });
+}
+
+// =====================================================================
+// QUIZ (Epreuve 2) - overlay live
+// =====================================================================
+function wireQuiz() {
+  const form = document.getElementById("quiz-form");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!quizState || quizState.status !== "open" || !quizState.qid || !myGroup) return;
+    const ans = document.getElementById("quiz-answer");
+    const send = document.getElementById("quiz-send");
+    const status = document.getElementById("quiz-status");
+    const text = ans.value.trim();
+    if (!text) return;
+    const openedAt = tsToMs(quizState.openedAt) || quizState.openedAt || 0;
+    const deadline = openedAt + (quizState.durationSec || 5) * 1000;
+    if (Date.now() > deadline) {
+      status.textContent = "Temps ecoule"; status.className = "quiz-status late";
+      ans.disabled = true; send.disabled = true; return;
+    }
+    ans.disabled = true; send.disabled = true;
+    try {
+      await setDoc(doc(db, "quizRounds", quizState.qid, "answers", myGroup.id),
+        { text, answeredAt: serverTimestamp() }, { merge: true });
+      status.textContent = "Reponse envoyee !"; status.className = "quiz-status ok";
+    } catch (ex) {
+      status.textContent = "Echec d'envoi, reessaie."; status.className = "quiz-status late";
+      ans.disabled = false; send.disabled = false;
+    }
+  });
+}
+
+function handleQuiz() {
+  const overlay = document.getElementById("quiz-overlay");
+  if (!overlay) return;
+  const out = myGroup && myGroup.status === STATUS.OUT;
+  if (!quizState || quizState.status !== "open" || !quizState.qid || out) { hideQuiz(); return; }
+  const openedAt = tsToMs(quizState.openedAt) || quizState.openedAt || 0;
+  const deadline = openedAt + (quizState.durationSec || 5) * 1000;
+  if (Date.now() >= deadline) { hideQuiz(); return; }
+  if (quizShownQid !== quizState.qid) showQuiz(quizState, deadline);
+}
+
+function showQuiz(state, deadline) {
+  quizShownQid = state.qid;
+  const overlay = document.getElementById("quiz-overlay");
+  const ans = document.getElementById("quiz-answer");
+  const send = document.getElementById("quiz-send");
+  const status = document.getElementById("quiz-status");
+  document.getElementById("quiz-q").textContent = state.text || "";
+  ans.value = ""; ans.disabled = false; send.disabled = false;
+  status.textContent = ""; status.className = "quiz-status";
+  overlay.style.display = "flex";
+  setTimeout(() => ans.focus(), 60);
+  if (quizTimer) clearInterval(quizTimer);
+  const tick = () => {
+    const ms = deadline - Date.now();
+    const sec = Math.max(0, Math.ceil(ms / 1000));
+    const t = document.getElementById("quiz-timer");
+    if (t) { t.textContent = sec; t.classList.toggle("low", sec <= 3); }
+    if (ms <= 0) {
+      clearInterval(quizTimer); quizTimer = null;
+      ans.disabled = true; send.disabled = true;
+      if (!status.classList.contains("ok")) { status.textContent = "Temps ecoule"; status.className = "quiz-status late"; }
+      setTimeout(() => { if (quizShownQid === state.qid) hideQuiz(); }, 2500);
+    }
+  };
+  tick();
+  quizTimer = setInterval(tick, 250);
+}
+
+function hideQuiz() {
+  const overlay = document.getElementById("quiz-overlay");
+  if (overlay) overlay.style.display = "none";
+  if (quizTimer) { clearInterval(quizTimer); quizTimer = null; }
+  quizShownQid = null;
 }
 
 // =====================================================================

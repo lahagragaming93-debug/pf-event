@@ -12,6 +12,7 @@ import {
 
 import { checkAdminAuthorized, adminPasswordOk, getMyUid } from "./auth.js";
 import { seedObjectives, seedChasses } from "./objectives.js";
+import { seedQuestions } from "./questions.js";
 
 import {
   EVENT_NAME, STATUS, STATUS_LABEL, EVENT_STATUS, SUB_STATUS, SUB_STATUS_LABEL, OBJ_TYPE,
@@ -36,6 +37,13 @@ const badgeUnsubs = {};  // gid -> [unsub...]
 
 let chasseBlob = null;   // image en attente pour creation de chasse
 let cgIdBlob = null;     // image carte d'identite en attente (creation groupe)
+
+// Quiz (Epreuve 2)
+let quizCfg = null;
+let allQuestions = [];
+let quizRoundAnswers = {};   // gid -> { text, answeredAt, credited }
+let unsubQuizRound = null;
+let lastRoundQid = null;
 
 // Regles par defaut (editables depuis le cockpit, vues par les groupes)
 const DEFAULT_RULES = `PROTOCOLE OMERTA // REGLES DU JEU
@@ -135,6 +143,12 @@ async function startCockpit() {
   if (!rulesSnap.exists()) {
     await setDoc(rulesRef, { text: DEFAULT_RULES, updatedAt: serverTimestamp() });
   }
+  // Cree config/quiz si absent (etat du quiz live)
+  const quizRef = doc(db, "config", "quiz");
+  const quizSnap = await getDoc(quizRef);
+  if (!quizSnap.exists()) {
+    await setDoc(quizRef, { status: "idle", qid: null, text: "", openedAt: null, durationSec: 5, number: 0 });
+  }
 
   wireGlobalHandlers();
   wireEventBar();
@@ -156,6 +170,16 @@ async function startCockpit() {
   onSnapshot(collection(db, "chasses"), (s) => {
     allChasses = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
     onChassesChange();
+  });
+  // Quiz: etat live + banque de questions
+  onSnapshot(doc(db, "config", "quiz"), (s) => {
+    quizCfg = s.exists() ? s.data() : null;
+    syncQuizRoundListener();
+    if (currentMode === "quiz") renderQuizAdmin();
+  });
+  onSnapshot(collection(db, "questions"), (s) => {
+    allQuestions = s.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.order || 0) - (b.order || 0));
+    if (currentMode === "quiz") renderQuizAdmin();
   });
 
   startCountdown();
@@ -459,7 +483,7 @@ function wireBroadcast() {
 function switchMode(mode) {
   currentMode = mode;
   document.querySelectorAll("#gm-modes .tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === mode));
-  ["group", "objectives", "chasses", "classement", "out", "create", "rules"].forEach((md) => {
+  ["group", "objectives", "chasses", "classement", "out", "create", "quiz", "rules"].forEach((md) => {
     document.getElementById("mode-" + md).style.display = (md === mode) ? "block" : "none";
   });
   if (mode === "group") renderModeGroup();
@@ -468,6 +492,7 @@ function switchMode(mode) {
   if (mode === "classement") renderClassementAdmin();
   if (mode === "out") renderOutAdmin();
   if (mode === "create") renderCreateAdmin();
+  if (mode === "quiz") renderQuizAdmin();
   if (mode === "rules") renderRulesAdmin();
 }
 
@@ -1283,6 +1308,146 @@ async function createGroup(e) {
 }
 
 // =====================================================================
+// MODE QUIZ (Epreuve 2) - questions live, reponse libre, credit manuel
+// =====================================================================
+function syncQuizRoundListener() {
+  const qid = quizCfg && quizCfg.qid ? quizCfg.qid : null;
+  if (qid === lastRoundQid) return;
+  if (unsubQuizRound) { unsubQuizRound(); unsubQuizRound = null; }
+  quizRoundAnswers = {};
+  lastRoundQid = qid;
+  if (!qid) { if (currentMode === "quiz") updateQuizAnswers(); return; }
+  unsubQuizRound = onSnapshot(collection(db, "quizRounds", qid, "answers"), (s) => {
+    quizRoundAnswers = {};
+    s.docs.forEach((d) => { quizRoundAnswers[d.id] = d.data(); });
+    if (currentMode === "quiz") updateQuizAnswers();
+  });
+}
+
+function updateQuizAnswers() {
+  const wrap = document.getElementById("quiz-answers");
+  if (!wrap) return;
+  if (!quizCfg || quizCfg.status !== "open" || !quizCfg.qid) { wrap.innerHTML = ""; return; }
+  const q = allQuestions.find((x) => x.id === quizCfg.qid);
+  const expected = q ? q.answer : "";
+  const players = allGroups.filter((g) => g.status !== STATUS.OUT);
+  let rows = `<div class="kvp" style="margin-top:0.6rem"><span>Reponse attendue</span><b class="neon">${escapeHtml(expected)}</b></div>`;
+  if (!players.length) rows += `<div class="list-empty">Aucun groupe actif.</div>`;
+  players.forEach((g) => {
+    const a = quizRoundAnswers[g.id];
+    rows += `<div class="quiz-ans-row">
+      <div class="qa-name">${escapeHtml(g.name)}</div>
+      ${a ? `<div class="qa-text">${escapeHtml(a.text)}</div>` : `<div class="qa-none">pas de reponse</div>`}
+      ${a && a.credited
+        ? `<span class="badge validated">credite +1</span>`
+        : `<button class="btn term sm" data-action="credit-quiz" data-gid="${g.id}">+1 pt</button>`}
+    </div>`;
+  });
+  wrap.innerHTML = rows;
+}
+
+function renderQuizAdmin() {
+  const wrap = document.getElementById("mode-quiz");
+  const isOpen = quizCfg && quizCfg.status === "open" && quizCfg.qid;
+  const activeQ = isOpen ? allQuestions.find((x) => x.id === quizCfg.qid) : null;
+
+  const players = allGroups.filter((g) => g.status !== STATUS.OUT)
+    .slice().sort((a, b) => ((b.points?.[3] || 0) - (a.points?.[3] || 0)));
+  const scoreRows = players.length ? players.map((g) => `
+    <div class="quiz-ans-row">
+      <div class="qa-name">${escapeHtml(g.name)}</div>
+      <div class="qa-text" style="color:var(--neon)">${g.points?.[3] || 0} pts</div>
+      <button class="btn danger sm" data-action="disqualify" data-gid="${g.id}">Disqualifier</button>
+    </div>`).join("") : `<div class="list-empty">Aucun groupe en course.</div>`;
+
+  const bankRows = allQuestions.length ? allQuestions.map((q) => `
+    <div class="q-bank-row">
+      <div class="qb-main"><div class="qb-text">${escapeHtml(q.text)}</div><div class="qb-ans">Rep: ${escapeHtml(q.answer)}</div></div>
+      <button class="btn term sm" data-action="open-question" data-qid="${q.id}">Ouvrir</button>
+      <button class="btn ghost sm" data-action="del-question" data-id="${q.id}">X</button>
+    </div>`).join("") : `<div class="list-empty">Banque vide. Clique "Initialiser la banque".</div>`;
+
+  wrap.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head"><h3>Question en direct (Epreuve 2)</h3>
+        <label class="dim tiny" style="display:flex;align-items:center;gap:0.4rem">Duree (s)
+          <input type="number" id="quiz-dur" value="${(quizCfg && quizCfg.durationSec) || 5}" min="2" max="120" style="width:64px"></label></div>
+      ${isOpen
+        ? `<div class="kvp"><span>Question diffusee</span><b>${escapeHtml(activeQ ? activeQ.text : quizCfg.text)}</b></div>
+           <button class="btn danger sm" data-action="close-question" style="margin:0.6rem 0">Fermer la question</button>`
+        : `<div class="dim tiny">Aucune question ouverte. Clique "Ouvrir" sur une question ci-dessous.</div>`}
+      <div id="quiz-answers"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head"><h3>Scores Manche 3 (le plus bas est elimine)</h3></div>
+      ${scoreRows}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head"><h3>Ajouter une question</h3>
+        <button class="btn term sm" data-action="seed-questions">Initialiser la banque</button></div>
+      <form id="q-add-form" class="row" style="align-items:flex-end">
+        <label class="field" style="flex:2"><span>Question</span><input type="text" id="q-add-text" placeholder="ex: Code du silence de la mafia ?" /></label>
+        <label class="field" style="flex:1"><span>Reponse attendue</span><input type="text" id="q-add-ans" placeholder="ex: Omerta" /></label>
+        <button class="btn primary" type="submit" style="flex:0 0 auto">Ajouter</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Banque de questions (${allQuestions.length})</h3></div>
+      ${bankRows}
+    </div>`;
+
+  updateQuizAnswers();
+}
+
+async function openQuestion(qid) {
+  const q = allQuestions.find((x) => x.id === qid); if (!q) return;
+  const durEl = document.getElementById("quiz-dur");
+  const dur = (durEl && parseInt(durEl.value, 10)) || 5;
+  const number = ((quizCfg && quizCfg.number) || 0) + 1;
+  await setDoc(doc(db, "config", "quiz"),
+    { status: "open", qid, text: q.text, openedAt: Date.now(), durationSec: dur, number }, { merge: true });
+  toast(`Question diffusee (${dur}s).`, "success");
+}
+
+async function closeQuestion() {
+  await setDoc(doc(db, "config", "quiz"), { status: "closed" }, { merge: true });
+  toast("Question fermee.");
+}
+
+async function creditQuiz(gid) {
+  if (!quizCfg || !quizCfg.qid) return;
+  if (quizRoundAnswers[gid] && quizRoundAnswers[gid].credited) { toast("Deja credite."); return; }
+  await updateDoc(doc(db, "groups", gid), { ["points.3"]: increment(1) });
+  await setDoc(doc(db, "quizRounds", quizCfg.qid, "answers", gid), { credited: true }, { merge: true });
+  toast("+1 pt credite.", "success");
+}
+
+async function addQuestion() {
+  const text = document.getElementById("q-add-text").value.trim();
+  const answer = document.getElementById("q-add-ans").value.trim();
+  if (!text || !answer) { toast("Question et reponse requises.", "error"); return; }
+  await addDoc(collection(db, "questions"), { text, answer, order: Date.now(), createdAt: serverTimestamp() });
+  toast("Question ajoutee.", "success");
+}
+
+async function delQuestion(id) {
+  const ok = await modalConfirm("Supprimer la question", "Confirmer la suppression ?", { danger: true });
+  if (!ok) return;
+  await deleteDoc(doc(db, "questions", id));
+  toast("Question supprimee.");
+}
+
+async function doSeedQuestions() {
+  const ok = await modalConfirm("Initialiser la banque", "Charge la banque de questions (theme mafia/gang). Re-cliquer met a jour sans doublon.", {});
+  if (!ok) return;
+  const n = await seedQuestions();
+  toast(`${n} questions chargees.`, "success");
+}
+
+// =====================================================================
 // MODE REGLES DU JEU (editeur GM)
 // =====================================================================
 async function renderRulesAdmin() {
@@ -1332,6 +1497,11 @@ function wireGlobalHandlers() {
       case "save-identity": saveIdentity(gid); break;
       case "disqualify": disqualify(gid); break;
       case "reactivate": reactivate(gid); break;
+      case "open-question": openQuestion(el.dataset.qid); break;
+      case "close-question": closeQuestion(); break;
+      case "credit-quiz": creditQuiz(gid); break;
+      case "seed-questions": doSeedQuestions(); break;
+      case "del-question": delQuestion(id); break;
       case "obj-edit": editObjective(id); break;
       case "obj-del": delObjective(id); break;
       case "seed-obj": doSeedObjectives(); break;
@@ -1347,6 +1517,7 @@ function wireGlobalHandlers() {
   // Soumissions de formulaires gerees par delegation
   document.addEventListener("submit", (e) => {
     if (e.target.id === "obj-create-form") { e.preventDefault(); createObjective(); }
+    if (e.target.id === "q-add-form") { e.preventDefault(); addQuestion(); }
   });
   // Saisie libre des quantites Manche 1 (commit sur change / Entree)
   document.addEventListener("change", (e) => {

@@ -58,6 +58,20 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ---------------- banque de questions (Epreuve 2) ----------------
+    // GM UNIQUEMENT: les groupes ne doivent jamais voir les reponses.
+    match /questions/{qid} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---------------- reponses live du quiz ----------------
+    // Chaque groupe ecrit SA reponse (sous l'id de son groupe), le GM lit tout.
+    match /quizRounds/{qid}/answers/{gid} {
+      allow read: if isAdmin();
+      allow create, update: if isMember(gid);
+      allow delete: if isAdmin();
+    }
+
     // ---------------- groupes ----------------
     match /groups/{gid} {
       // Lecture par tout utilisateur connecte (classement + login + dashboard).
