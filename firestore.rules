@@ -42,7 +42,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     match /config/{other} {
-      allow read: if isSignedIn();
+      // 'admins' est exclu ici: il garde sa regle stricte (lecture GM only) ci-dessus.
+      // Sans cette exclusion, ce wildcard rendrait config/admins lisible par tout
+      // utilisateur connecte (fuite du mot de passe GM + des uids admins).
+      allow read: if isSignedIn() && other != 'admins';
       allow write: if isAdmin();
     }
 
