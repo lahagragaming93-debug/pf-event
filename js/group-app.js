@@ -287,9 +287,9 @@ function renderObjectives() {
       el.className = "obj" + (validated.length ? " done" : "");
       el.innerHTML = `
         <div class="obj-main">
-          <div class="obj-label">${escapeHtml(o.label)} ${o.repeatable ? '<span class="badge">REPETABLE</span>' : ""}</div>
+          <div class="obj-label">${escapeHtml(o.label)} ${o.repeatable ? '<span class="badge active">CUMULABLE</span>' : '<span class="badge">UNIQUE</span>'}</div>
           <div class="obj-meta">
-            ${o.points} pts ${o.repeatable ? "/ preuve validee" : ""} -
+            ${o.points} pts ${o.repeatable ? "par preuve validee (cumulable)" : "(une seule fois)"} -
             ${validated.length} validee(s) - ${pending.length} en attente
           </div>
         </div>

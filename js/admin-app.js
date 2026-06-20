@@ -644,6 +644,28 @@ async function validateSub(gid, sid) {
     }
   }
 
+  // Anti-cumul: un objectif UNIQUE (non repetable) ou une chasse ne credite
+  // qu'une seule fois par groupe. Un 2e validé est accepte mais sans points.
+  let unique = false;
+  if (sub.type === OBJ_TYPE.PHOTO) {
+    const o = allObjectives.find((x) => x.id === sub.objectiveId);
+    unique = o ? !o.repeatable : false;
+  } else if (sub.type === OBJ_TYPE.CHASSE) {
+    unique = true;
+  }
+  if (unique) {
+    const alreadyCredited = (cache.submissions || []).some((s) =>
+      s.id !== sid && s.credited &&
+      ((sub.objectiveId && s.objectiveId === sub.objectiveId) ||
+       (sub.chasseId && s.chasseId === sub.chasseId)));
+    if (alreadyCredited) {
+      await updateDoc(doc(db, "groups", gid, "submissions", sid),
+        { status: SUB_STATUS.VALIDATED, points: 0, credited: false, validatedAt: serverTimestamp() });
+      toast("Objectif unique deja credite pour ce groupe. Photo validee, sans cumul de points.", "info");
+      return;
+    }
+  }
+
   await runTransaction(db, async (tx) => {
     const subRef = doc(db, "groups", gid, "submissions", sid);
     const snap = await tx.get(subRef);
@@ -754,7 +776,7 @@ function renderObjectivesAdmin() {
     return arr.map((o) => `
       <div class="sub-row">
         <div class="sub-main">
-          <div style="font-size:0.88rem">${escapeHtml(o.label)} <span class="badge">${o.type}</span> ${o.repeatable ? '<span class="badge">repetable</span>' : ""}</div>
+          <div style="font-size:0.88rem">${escapeHtml(o.label)} <span class="badge">${o.type}</span> ${o.type === OBJ_TYPE.PHOTO ? (o.repeatable ? '<span class="badge active">cumulable</span>' : '<span class="badge">unique</span>') : ""}</div>
           <div class="tiny mute">${o.type === OBJ_TYPE.COUNT ? `cible: ${o.targetQty}` : `${o.points} pts`}</div>
         </div>
         <div class="sub-actions">
