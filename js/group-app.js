@@ -384,6 +384,7 @@ function renderProofSelect() {
 
 async function submitProof() {
   if (!pendingBlob || !myGroup) return;
+  if (!eventCfg) { toast("Configuration indisponible, reessaie.", "error"); return; }
   const sel = document.getElementById("proof-objective");
   const val = sel.value;
   if (!val) { toast("Selectionne un objectif.", "error"); return; }
@@ -627,26 +628,21 @@ function wireQuiz() {
   if (!form) return;
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (!quizState || quizState.status !== "open" || !quizState.qid || !myGroup) return;
+    if (!quizState || quizState.status !== "open" || !quizState.roundId || !myGroup) return;
     const ans = document.getElementById("quiz-answer");
     const send = document.getElementById("quiz-send");
     const status = document.getElementById("quiz-status");
     const text = ans.value.trim();
     if (!text) return;
-    const openedAt = tsToMs(quizState.openedAt) || quizState.openedAt || 0;
-    const deadline = openedAt + (quizState.durationSec || 5) * 1000;
-    if (Date.now() > deadline) {
-      status.textContent = "Temps ecoule"; status.className = "quiz-status late";
-      ans.disabled = true; send.disabled = true; return;
-    }
     ans.disabled = true; send.disabled = true;
     try {
-      await setDoc(doc(db, "quizRounds", quizState.qid, "answers", myGroup.id),
+      // La fenetre de reponse est tranchee cote SERVEUR (regles Firestore):
+      // une reponse hors delai / hors round est refusee.
+      await setDoc(doc(db, "quizRounds", quizState.roundId, "answers", myGroup.id),
         { text, answeredAt: serverTimestamp() }, { merge: true });
       status.textContent = "Reponse envoyee !"; status.className = "quiz-status ok";
     } catch (ex) {
-      status.textContent = "Echec d'envoi, reessaie."; status.className = "quiz-status late";
-      ans.disabled = false; send.disabled = false;
+      status.textContent = "Temps ecoule ou question fermee."; status.className = "quiz-status late";
     }
   });
 }
@@ -655,15 +651,14 @@ function handleQuiz() {
   const overlay = document.getElementById("quiz-overlay");
   if (!overlay) return;
   const out = myGroup && myGroup.status === STATUS.OUT;
-  if (!quizState || quizState.status !== "open" || !quizState.qid || out) { hideQuiz(); return; }
-  const openedAt = tsToMs(quizState.openedAt) || quizState.openedAt || 0;
-  const deadline = openedAt + (quizState.durationSec || 5) * 1000;
-  if (Date.now() >= deadline) { hideQuiz(); return; }
-  if (quizShownQid !== quizState.qid) showQuiz(quizState, deadline);
+  if (!quizState || quizState.status !== "open" || !quizState.roundId || out) { hideQuiz(); return; }
+  const closesAt = quizState.closesAt || ((tsToMs(quizState.openedAt) || 0) + (quizState.durationSec || 5) * 1000);
+  if (Date.now() >= closesAt + 1500) { hideQuiz(); return; }   // petite tolerance pour le decalage d'horloge
+  if (quizShownQid !== quizState.roundId) showQuiz(quizState, closesAt);
 }
 
-function showQuiz(state, deadline) {
-  quizShownQid = state.qid;
+function showQuiz(state, closesAt) {
+  quizShownQid = state.roundId;
   const overlay = document.getElementById("quiz-overlay");
   const ans = document.getElementById("quiz-answer");
   const send = document.getElementById("quiz-send");
@@ -675,7 +670,7 @@ function showQuiz(state, deadline) {
   setTimeout(() => ans.focus(), 60);
   if (quizTimer) clearInterval(quizTimer);
   const tick = () => {
-    const ms = deadline - Date.now();
+    const ms = closesAt - Date.now();
     const sec = Math.max(0, Math.ceil(ms / 1000));
     const t = document.getElementById("quiz-timer");
     if (t) { t.textContent = sec; t.classList.toggle("low", sec <= 3); }
@@ -683,7 +678,7 @@ function showQuiz(state, deadline) {
       clearInterval(quizTimer); quizTimer = null;
       ans.disabled = true; send.disabled = true;
       if (!status.classList.contains("ok")) { status.textContent = "Temps ecoule"; status.className = "quiz-status late"; }
-      setTimeout(() => { if (quizShownQid === state.qid) hideQuiz(); }, 2500);
+      setTimeout(() => { if (quizShownQid === state.roundId) hideQuiz(); }, 2500);
     }
   };
   tick();

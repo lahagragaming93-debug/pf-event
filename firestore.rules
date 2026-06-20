@@ -65,11 +65,19 @@ service cloud.firestore {
     }
 
     // ---------------- reponses live du quiz ----------------
-    // Chaque groupe ecrit SA reponse (sous l'id de son groupe), le GM lit tout.
-    match /quizRounds/{qid}/answers/{gid} {
-      allow read: if isAdmin();
-      allow create, update: if isMember(gid);
-      allow delete: if isAdmin();
+    // Le GM lit/ecrit tout (credit). Un groupe ecrit UNIQUEMENT sa reponse
+    // (text + answeredAt), seulement pendant la fenetre serveur de la question
+    // courante: empeche d'ecrire 'credited', de repondre hors delai, ou pour
+    // un autre round. La fenetre est tranchee cote SERVEUR (request.time).
+    match /quizRounds/{rid}/answers/{gid} {
+      allow read, write: if isAdmin();
+      allow create, update: if isMember(gid)
+        && request.resource.data.keys().hasOnly(['text', 'answeredAt'])
+        && request.resource.data.answeredAt == request.time
+        && exists(/databases/$(database)/documents/config/quiz)
+        && get(/databases/$(database)/documents/config/quiz).data.roundId == rid
+        && get(/databases/$(database)/documents/config/quiz).data.status == 'open'
+        && request.time.toMillis() < get(/databases/$(database)/documents/config/quiz).data.closesAt;
     }
 
     // ---------------- groupes ----------------

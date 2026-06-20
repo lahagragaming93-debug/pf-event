@@ -342,7 +342,7 @@ function onGroupsChange() {
 function onObjectivesChange() {
   if (currentMode === "objectives") renderObjectivesAdmin();
   if (currentMode === "group" && selectedGroupId) { updateGroupQty(selectedGroupId); updateGroupSubs(selectedGroupId); }
-  reconcileManche1();
+  // Pas de reconcile ici: editer un objectif ne doit jamais auto-eliminer des groupes.
 }
 function onChassesChange() {
   if (currentMode === "chasses") renderChassesAdmin();
@@ -372,7 +372,9 @@ function updateEventBarUI() {
 let reconciling = false;
 async function reconcileManche1() {
   if (!eventCfg || eventCfg.currentManche !== 1 || reconciling) return;
-  if (eventCfg.status === EVENT_STATUS.FINISHED) return;
+  // N'auto-complete / n'elimine QUE pendant que la manche tourne.
+  // (evite qu'une edition d'objectif en idle/pause cloture la manche par effet de bord)
+  if (eventCfg.status !== EVENT_STATUS.RUNNING) return;
   const countObjs = allObjectives.filter((o) => o.manche === 1 && o.type === OBJ_TYPE.COUNT);
   if (!countObjs.length) return;
 
@@ -786,59 +788,73 @@ async function validateSub(gid, sid) {
   } else if (sub.type === OBJ_TYPE.CHASSE) {
     const c = allChasses.find((x) => x.id === sub.chasseId);
     pts = c ? (c.points || 0) : 0;
-    // Verifie la fenetre
-    if (c && c.closesAt && (tsToMs(sub.submittedAt) || 0) > tsToMs(c.closesAt)) {
+    // Hors delai si: soumise apres closesAt, OU chasse sans limite fermee, OU deja marquee LATE cote groupe
+    const overWindow = c && c.closesAt && (tsToMs(sub.submittedAt) || 0) > tsToMs(c.closesAt);
+    const closedNoLimit = c && !c.closesAt && c.status === "closed";
+    if (overWindow || closedNoLimit || sub.status === SUB_STATUS.LATE) {
       await updateDoc(doc(db, "groups", gid, "submissions", sid), { status: SUB_STATUS.LATE });
-      toast("Soumission hors delai (chasse fermee). Non creditee.", "error");
+      toast("Soumission hors delai. Non creditee.", "error");
       return;
     }
   }
 
-  // Anti-cumul: un objectif UNIQUE (non repetable) ou une chasse ne credite
-  // qu'une seule fois par groupe. Un 2e validé est accepte mais sans points.
-  let unique = false;
-  if (sub.type === OBJ_TYPE.PHOTO) {
-    const o = allObjectives.find((x) => x.id === sub.objectiveId);
-    unique = o ? !o.repeatable : false;
-  } else if (sub.type === OBJ_TYPE.CHASSE) {
-    unique = true;
-  }
-  if (unique) {
-    const alreadyCredited = (cache.submissions || []).some((s) =>
-      s.id !== sid && s.credited &&
-      ((sub.objectiveId && s.objectiveId === sub.objectiveId) ||
-       (sub.chasseId && s.chasseId === sub.chasseId)));
-    if (alreadyCredited) {
-      await updateDoc(doc(db, "groups", gid, "submissions", sid),
-        { status: SUB_STATUS.VALIDATED, points: 0, credited: false, validatedAt: serverTimestamp() });
-      toast("Objectif unique deja credite pour ce groupe. Photo validee, sans cumul de points.", "info");
-      return;
-    }
-  }
+  // Cle d'unicite (null = cumulable). Verifiee + posee DANS la transaction (anti-race).
+  const uniqueKey = uniqueKeyFor(sub);
 
+  let creditedPts = 0, capped = false;
   await runTransaction(db, async (tx) => {
     const subRef = doc(db, "groups", gid, "submissions", sid);
-    const snap = await tx.get(subRef);
-    if (!snap.exists()) return;
-    const data = snap.data();
+    const grpRef = doc(db, "groups", gid);
+    const subSnap = await tx.get(subRef);
+    if (!subSnap.exists()) return;
+    const data = subSnap.data();
     if (data.credited) return;
     const manche = data.manche || (eventCfg ? eventCfg.currentManche : 1);
+    if (uniqueKey) {
+      const grpSnap = await tx.get(grpRef);
+      const ck = (grpSnap.exists() && grpSnap.data().creditedKeys) || {};
+      if (ck[uniqueKey]) {
+        // deja credite pour cet objectif unique -> validee mais SANS cumul
+        tx.update(subRef, { status: SUB_STATUS.VALIDATED, points: 0, credited: false, validatedAt: serverTimestamp() });
+        capped = true;
+        return;
+      }
+      tx.update(grpRef, { [`creditedKeys.${uniqueKey}`]: true, [`points.${manche}`]: increment(pts) });
+    } else {
+      tx.update(grpRef, { [`points.${manche}`]: increment(pts) });
+    }
     tx.update(subRef, { status: SUB_STATUS.VALIDATED, credited: true, points: pts, validatedAt: serverTimestamp() });
-    tx.update(doc(db, "groups", gid), { [`points.${manche}`]: increment(pts) });
+    creditedPts = pts;
   });
-  toast(`Preuve validee (+${pts} pts).`, "success");
+  if (capped) toast("Objectif unique deja credite pour ce groupe. Photo validee, sans cumul de points.", "info");
+  else toast(`Preuve validee (+${creditedPts} pts).`, "success");
+}
+
+// Cle d'unicite d'une soumission: objectif photo non-repetable ou chasse -> credit unique par groupe
+function uniqueKeyFor(sub) {
+  if (!sub) return null;
+  if (sub.type === OBJ_TYPE.PHOTO && sub.objectiveId) {
+    const o = allObjectives.find((x) => x.id === sub.objectiveId);
+    return (o && !o.repeatable) ? "o_" + sub.objectiveId : null;
+  }
+  if (sub.type === OBJ_TYPE.CHASSE && sub.chasseId) return "c_" + sub.chasseId;
+  return null;
 }
 
 async function rejectSub(gid, sid) {
   const note = await modalPrompt("Refuser la preuve", { label: "Motif (optionnel)", placeholder: "ex: photo illisible", okLabel: "Refuser" });
   await runTransaction(db, async (tx) => {
     const subRef = doc(db, "groups", gid, "submissions", sid);
+    const grpRef = doc(db, "groups", gid);
     const snap = await tx.get(subRef);
     if (!snap.exists()) return;
     const data = snap.data();
     const manche = data.manche || (eventCfg ? eventCfg.currentManche : 1);
     if (data.credited) {
-      tx.update(doc(db, "groups", gid), { [`points.${manche}`]: increment(-(data.points || 0)) });
+      const patch = { [`points.${manche}`]: increment(-(data.points || 0)) };
+      const uk = uniqueKeyFor(data);
+      if (uk) patch[`creditedKeys.${uk}`] = false;   // libere pour re-credit
+      tx.update(grpRef, patch);
     }
     tx.update(subRef, { status: SUB_STATUS.REJECTED, credited: false, note: note || null });
   });
@@ -851,7 +867,10 @@ async function delSub(gid, sid) {
   const ok = await modalConfirm("Supprimer la preuve", "Supprime la soumission et sa photo. Si elle etait validee, les points sont retires.", { danger: true });
   if (!ok) return;
   if (sub && sub.credited) {
-    await updateDoc(doc(db, "groups", gid), { [`points.${sub.manche}`]: increment(-(sub.points || 0)) });
+    const patch = { [`points.${sub.manche}`]: increment(-(sub.points || 0)) };
+    const uk = uniqueKeyFor(sub);
+    if (uk) patch[`creditedKeys.${uk}`] = false;   // libere pour re-credit
+    await updateDoc(doc(db, "groups", gid), patch);
   }
   if (sub && sub.storagePath) { try { await deleteObject(storageRef(storage, sub.storagePath)); } catch {} }
   await deleteDoc(doc(db, "groups", gid, "submissions", sid));
@@ -1114,7 +1133,8 @@ async function openChasse(id) {
   toast(win > 0 ? `Chasse "${c.label}" ouverte (${win} min).` : `Epreuve "${c.label}" ouverte (sans limite, ferme-la a la main).`, "success");
 }
 async function closeChasse(id) {
-  await updateDoc(doc(db, "chasses", id), { status: "closed" });
+  // Fige closesAt a maintenant: meme une chasse "sans limite" a une borne apres fermeture
+  await updateDoc(doc(db, "chasses", id), { status: "closed", closesAt: Date.now() });
   toast("Chasse fermee.");
 }
 async function delChasse(id) {
@@ -1271,7 +1291,7 @@ async function createGroup(e) {
     const ref = await addDoc(collection(db, "groups"), {
       name, nameLower: name.toLowerCase(), password: pass,
       status: STATUS.ACTIVE, memberUids: [],
-      manche1Progress: {}, points: { 1: 0, 2: 0, 3: 0 },
+      manche1Progress: {}, points: { 1: 0, 2: 0, 3: 0 }, creditedKeys: {},
       completedAt: null, completionRank: null, eliminatedAt: null,
       lastReadByGm: serverTimestamp(), createdAt: serverTimestamp()
     });
@@ -1311,13 +1331,13 @@ async function createGroup(e) {
 // MODE QUIZ (Epreuve 2) - questions live, reponse libre, credit manuel
 // =====================================================================
 function syncQuizRoundListener() {
-  const qid = quizCfg && quizCfg.qid ? quizCfg.qid : null;
-  if (qid === lastRoundQid) return;
+  const rid = quizCfg && quizCfg.roundId ? quizCfg.roundId : null;
+  if (rid === lastRoundQid) return;
   if (unsubQuizRound) { unsubQuizRound(); unsubQuizRound = null; }
   quizRoundAnswers = {};
-  lastRoundQid = qid;
-  if (!qid) { if (currentMode === "quiz") updateQuizAnswers(); return; }
-  unsubQuizRound = onSnapshot(collection(db, "quizRounds", qid, "answers"), (s) => {
+  lastRoundQid = rid;
+  if (!rid) { if (currentMode === "quiz") updateQuizAnswers(); return; }
+  unsubQuizRound = onSnapshot(collection(db, "quizRounds", rid, "answers"), (s) => {
     quizRoundAnswers = {};
     s.docs.forEach((d) => { quizRoundAnswers[d.id] = d.data(); });
     if (currentMode === "quiz") updateQuizAnswers();
@@ -1327,20 +1347,25 @@ function syncQuizRoundListener() {
 function updateQuizAnswers() {
   const wrap = document.getElementById("quiz-answers");
   if (!wrap) return;
-  if (!quizCfg || quizCfg.status !== "open" || !quizCfg.qid) { wrap.innerHTML = ""; return; }
+  if (!quizCfg || quizCfg.status !== "open" || !quizCfg.roundId) { wrap.innerHTML = ""; return; }
   const q = allQuestions.find((x) => x.id === quizCfg.qid);
   const expected = q ? q.answer : "";
+  const closesAt = quizCfg.closesAt || 0;
   const players = allGroups.filter((g) => g.status !== STATUS.OUT);
   let rows = `<div class="kvp" style="margin-top:0.6rem"><span>Reponse attendue</span><b class="neon">${escapeHtml(expected)}</b></div>`;
   if (!players.length) rows += `<div class="list-empty">Aucun groupe actif.</div>`;
   players.forEach((g) => {
     const a = quizRoundAnswers[g.id];
+    const late = a && a.answeredAt && closesAt && ((tsToMs(a.answeredAt) || 0) > closesAt);
+    let right;
+    if (!a || !a.text) right = `<span class="qa-none">pas de reponse</span>`;
+    else if (a.credited) right = `<span class="badge validated">credite +1</span>`;
+    else if (late) right = `<span class="badge late">HORS DELAI</span>`;
+    else right = `<button class="btn term sm" data-action="credit-quiz" data-gid="${g.id}">+1 pt</button>`;
     rows += `<div class="quiz-ans-row">
       <div class="qa-name">${escapeHtml(g.name)}</div>
-      ${a ? `<div class="qa-text">${escapeHtml(a.text)}</div>` : `<div class="qa-none">pas de reponse</div>`}
-      ${a && a.credited
-        ? `<span class="badge validated">credite +1</span>`
-        : `<button class="btn term sm" data-action="credit-quiz" data-gid="${g.id}">+1 pt</button>`}
+      ${a && a.text ? `<div class="qa-text">${escapeHtml(a.text)}</div>` : `<div class="qa-none">-</div>`}
+      ${right}
     </div>`;
   });
   wrap.innerHTML = rows;
@@ -1407,8 +1432,10 @@ async function openQuestion(qid) {
   const durEl = document.getElementById("quiz-dur");
   const dur = (durEl && parseInt(durEl.value, 10)) || 5;
   const number = ((quizCfg && quizCfg.number) || 0) + 1;
+  const openedAt = Date.now();
+  const roundId = `${qid}_${number}`;   // round unique -> pas de reponses/credits residuels
   await setDoc(doc(db, "config", "quiz"),
-    { status: "open", qid, text: q.text, openedAt: Date.now(), durationSec: dur, number }, { merge: true });
+    { status: "open", qid, roundId, text: q.text, openedAt, durationSec: dur, closesAt: openedAt + dur * 1000, number }, { merge: true });
   toast(`Question diffusee (${dur}s).`, "success");
 }
 
@@ -1418,11 +1445,22 @@ async function closeQuestion() {
 }
 
 async function creditQuiz(gid) {
-  if (!quizCfg || !quizCfg.qid) return;
-  if (quizRoundAnswers[gid] && quizRoundAnswers[gid].credited) { toast("Deja credite."); return; }
-  await updateDoc(doc(db, "groups", gid), { ["points.3"]: increment(1) });
-  await setDoc(doc(db, "quizRounds", quizCfg.qid, "answers", gid), { credited: true }, { merge: true });
-  toast("+1 pt credite.", "success");
+  if (!quizCfg || !quizCfg.roundId) return;
+  const a = quizRoundAnswers[gid];
+  if (!a || !a.text) { toast("Ce groupe n'a pas repondu.", "error"); return; }
+  if (a.credited) { toast("Deja credite."); return; }
+  const rid = quizCfg.roundId;
+  try {
+    await runTransaction(db, async (tx) => {
+      const ansRef = doc(db, "quizRounds", rid, "answers", gid);
+      const snap = await tx.get(ansRef);
+      if (!snap.exists() || !snap.data().text) throw new Error("no-answer");
+      if (snap.data().credited) return;   // deja credite (idempotent)
+      tx.update(ansRef, { credited: true });
+      tx.update(doc(db, "groups", gid), { ["points.3"]: increment(1) });
+    });
+    toast("+1 pt credite.", "success");
+  } catch (e) { toast("Credit impossible.", "error"); }
 }
 
 async function addQuestion() {
