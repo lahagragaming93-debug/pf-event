@@ -470,21 +470,20 @@ function renderChasses() {
       ${c.photoUrl ? `<img class="ch-photo" src="${escapeHtml(c.photoUrl)}" alt="lieu" />` : ""}
       <div class="ch-body">
         <div class="ch-title"><span class="live-dot"></span>${escapeHtml(c.label)}</div>
-        <div class="dim tiny up">Fenetre de chasse - ${c.points} pts</div>
+        <div class="dim tiny up">${c.closesAt ? "Fenetre chronometree" : "En cours"} - ${c.points} pts</div>
         <div class="ch-timer" data-timer="${c.id}">--:--</div>
-        <button class="btn danger" data-go="${c.id}" style="margin-top:0.6rem">Transmettre la photo de la rencontre</button>
+        <button class="btn danger" data-go="${c.id}" style="margin-top:0.6rem">Transmettre une photo</button>
       </div>`;
     wrap.appendChild(el);
 
     const timerEl = el.querySelector(`[data-timer="${c.id}"]`);
     const upd = () => {
-      const ms = c.closesAt ? Math.max(0, tsToMs(c.closesAt) - Date.now()) : 0;
-      timerEl.textContent = formatHud(ms);
-      if (ms <= 0) timerEl.textContent = "FENETRE FERMEE";
+      if (!c.closesAt) { timerEl.textContent = "EN COURS"; return; }
+      const ms = Math.max(0, tsToMs(c.closesAt) - Date.now());
+      timerEl.textContent = ms > 0 ? formatHud(ms) : "FENETRE FERMEE";
     };
     upd();
-    const t = setInterval(upd, 1000);
-    chasseTimers.push(t);
+    if (c.closesAt) { const t = setInterval(upd, 1000); chasseTimers.push(t); }
 
     el.querySelector(`[data-go="${c.id}"]`).addEventListener("click", () => {
       activateTab("preuve");

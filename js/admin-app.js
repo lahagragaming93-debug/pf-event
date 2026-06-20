@@ -1004,7 +1004,7 @@ function renderChassesAdmin() {
         ${c.photoUrl ? `<img class="mini-thumb" src="${escapeHtml(c.photoUrl)}" data-action="view-img" data-url="${escapeHtml(c.photoUrl)}" alt="lieu" />` : `<div class="mini-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--txt-mute)">?</div>`}
         <div class="sub-main">
           <div style="font-size:0.88rem">${escapeHtml(c.label)} <span class="badge ${open ? "active" : c.status === "closed" ? "out" : ""}">${c.status}</span></div>
-          <div class="tiny mute">M${c.manche} - ${c.points} pts - fenetre ${c.windowMinutes} min ${open ? `- reste <span class="ch-rem" data-id="${c.id}">${formatHud(remaining)}</span>` : ""}</div>
+          <div class="tiny mute">M${c.manche} - ${c.points} pts - ${c.windowMinutes > 0 ? `fenetre ${c.windowMinutes} min` : "sans limite"} ${open ? (c.closesAt ? `- reste <span class="ch-rem" data-id="${c.id}">${formatHud(remaining)}</span>` : "- EN COURS") : ""}</div>
         </div>
         <div class="sub-actions">
           ${open
@@ -1024,7 +1024,7 @@ function renderChassesAdmin() {
         <label class="field" style="flex:2"><span>Titre</span><input type="text" id="ch-label" placeholder="ex: Chasse Jour 2 - 21h" /></label>
         <label class="field" style="flex:0 0 90px"><span>Manche</span><select id="ch-m"><option>2</option><option>3</option></select></label>
         <label class="field" style="flex:0 0 100px"><span>Points</span><input type="number" id="ch-pts" value="100" /></label>
-        <label class="field" style="flex:0 0 120px"><span>Fenetre (min)</span><input type="number" id="ch-win" value="60" /></label>
+        <label class="field" style="flex:0 0 150px"><span>Fenetre (min, 0=sans limite)</span><input type="number" id="ch-win" value="60" min="0" /></label>
       </div>
       <div class="paste-zone" id="ch-paste" tabindex="0">
         <div class="pz-icon">[ + ]</div>
@@ -1054,7 +1054,8 @@ async function createChasse() {
   const label = document.getElementById("ch-label").value.trim();
   const manche = parseInt(document.getElementById("ch-m").value, 10);
   const points = parseInt(document.getElementById("ch-pts").value, 10) || 100;
-  const win = parseInt(document.getElementById("ch-win").value, 10) || 60;
+  const winRaw = parseInt(document.getElementById("ch-win").value, 10);
+  const win = isNaN(winRaw) ? 0 : Math.max(0, winRaw);   // 0 = sans limite
   if (!label) { toast("Titre requis.", "error"); return; }
 
   const btn = document.getElementById("ch-create");
@@ -1080,10 +1081,11 @@ async function createChasse() {
 async function openChasse(id) {
   const c = allChasses.find((x) => x.id === id); if (!c) return;
   const now = Date.now();
+  const win = c.windowMinutes || 0;   // 0 = sans limite (ouverte jusqu'a fermeture)
   await updateDoc(doc(db, "chasses", id), {
-    status: "open", openedAt: now, closesAt: now + (c.windowMinutes || 60) * 60000
+    status: "open", openedAt: now, closesAt: win > 0 ? now + win * 60000 : null
   });
-  toast(`Chasse "${c.label}" ouverte (${c.windowMinutes} min).`, "success");
+  toast(win > 0 ? `Chasse "${c.label}" ouverte (${win} min).` : `Epreuve "${c.label}" ouverte (sans limite, ferme-la a la main).`, "success");
 }
 async function closeChasse(id) {
   await updateDoc(doc(db, "chasses", id), { status: "closed" });
