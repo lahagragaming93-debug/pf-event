@@ -552,8 +552,11 @@ function updateGroupMeta(gid) {
       <button class="btn sm ghost" data-action="regen-pass" data-gid="${gid}">Regen</button></span>
     </div>
     <div class="row" style="margin-top:0.8rem">
-      <button class="btn term sm" data-action="mark-complete" data-gid="${gid}">Marquer complete / qualifier</button>
-      <button class="btn danger sm" data-action="del-group" data-gid="${gid}" style="flex:0 0 auto">Supprimer la cellule</button>
+      ${g.status === STATUS.OUT
+        ? `<button class="btn term sm" data-action="reactivate" data-gid="${gid}">Reactiver (en course)</button>`
+        : `<button class="btn term sm" data-action="mark-complete" data-gid="${gid}">Marquer complete / qualifier</button>
+           <button class="btn danger sm" data-action="disqualify" data-gid="${gid}">Disqualifier (OUT)</button>`}
+      <button class="btn danger sm" data-action="del-group" data-gid="${gid}" style="flex:0 0 auto">Supprimer</button>
     </div>`;
 
   // Bloc points manuel - masque en Manche 1 (qui se joue a l'ordre de completion, pas aux points)
@@ -731,6 +734,18 @@ async function markComplete(gid) {
     status: STATUS.COMPLETED, completedAt: serverTimestamp(), completionRank: completedCount + 1
   });
   toast(`${g.name} marque complete (#${completedCount + 1}).`, "success");
+}
+
+// Disqualification / reactivation manuelle (pilotage Manche 3: course, paintball...)
+async function disqualify(gid) {
+  const g = groupsMap[gid]; if (!g) return;
+  await updateDoc(doc(db, "groups", gid), { status: STATUS.OUT, eliminatedAt: serverTimestamp() });
+  toast(`${g.name} disqualifie (OUT).`);
+}
+async function reactivate(gid) {
+  const g = groupsMap[gid]; if (!g) return;
+  await updateDoc(doc(db, "groups", gid), { status: STATUS.ACTIVE, eliminatedAt: null });
+  toast(`${g.name} reactive (en course).`, "success");
 }
 
 async function validateSub(gid, sid) {
@@ -1312,6 +1327,8 @@ function wireGlobalHandlers() {
       case "regen-pass": regenPass(gid); break;
       case "del-group": delGroup(gid); break;
       case "save-identity": saveIdentity(gid); break;
+      case "disqualify": disqualify(gid); break;
+      case "reactivate": reactivate(gid); break;
       case "obj-edit": editObjective(id); break;
       case "obj-del": delObjective(id); break;
       case "seed-obj": doSeedObjectives(); break;
